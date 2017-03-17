@@ -8,11 +8,15 @@ class Command(BaseCommand):
     help = 'Add drifter metadata to archive'
 
     def handle(self, *args, **options):
-        if not len(args)==2:
+        if not len(args)>=2:
             raise IOError('Please provide two filenames')
 
-        uris = uris_from_args(*args)
+        uris = uris_from_args(args[0], args[1])
+        if len(args)==3:
+            num=int(args[2])
+        else:
+            num=0
         count = SVPDrifter.objects.add_svp_drifters(uris[0], uris[1],
-                maxnum=50)
+                maxnum=num)
         print 'Added %d new drifter datasets'%count
 

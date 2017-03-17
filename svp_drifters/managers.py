@@ -77,7 +77,7 @@ class SVPDrifterManager(models.Manager):
                     ds.geographic_location=self.trajectory(id, nansat_filename(uri_data))
                     ds.save()
                     count += 1
-                    if maxnum and count>maxnum:
+                    if maxnum and count>=maxnum:
                         break
             ff.close()
         return count
