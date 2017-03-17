@@ -1,46 +1,56 @@
 print("Read drifter data")
 print("Read id, month, day, year, latitude, longitude, temperature, zonal velocity, meridional velocity, speed")
 
+import datetime
 import numpy as np
 
+fn = '/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat'
+
 # load drifter id's
-id=np.loadtxt('buoydata_15001_sep16.dat',usecols=(0,))
+ids = np.loadtxt(fn,usecols=(0,))
+drifters = {}
+for id in np.unique(ids):
+    drifters[id] = {}
 
 # load drifter date (month)
-mon=np.loadtxt('buoydata_15001_sep16.dat',usecols=(1,))
+mon=np.loadtxt(fn,usecols=(1,))
 
 # load drifter date (day)
-day=np.loadtxt('buoydata_15001_sep16.dat',usecols=(2,))
+day=np.loadtxt(fn,usecols=(2,))
 
 # load drifter date (year)
-year=np.loadtxt('buoydata_15001_sep16.dat',usecols=(3,))
+year=np.loadtxt(fn,usecols=(3,))
+
+# Create numpy array of np.datetime64
+tt = np.array([np.datetime64(datetime.datetime(y,m,d)) for y,m,d in zip(year,
+    mon, day)])
 
 # load drifter location (latitude)
-lat=np.loadtxt('buoydata_15001_sep16.dat',usecols=(4,))
+lat=np.loadtxt(fn,usecols=(4,))
 
 # load drifter location (longitude)
-lon=np.loadtxt('buoydata_15001_sep16.dat',usecols=(5,))
+lon=np.loadtxt(fn,usecols=(5,))
 
 # load temperature
-temp=np.loadtxt('buoydata_15001_sep16.dat',usecols=(6,))
+temp=np.loadtxt(fn,usecols=(6,))
 
 # load zonal velocity
-zon=np.loadtxt('buoydata_15001_sep16.dat',usecols=(7,))
+zon=np.loadtxt(fn,usecols=(7,))
 
 # load meridional velocity
-mer=np.loadtxt('buoydata_15001_sep16.dat',usecols=(8,))
+mer=np.loadtxt(fn,usecols=(8,))
 
 # load speed
-speed=np.loadtxt('buoydata_15001_sep16.dat',usecols=(9,))
+speed=np.loadtxt(fn,usecols=(9,))
 
 # load error (variance in latitude)
-varlat=np.loadtxt('buoydata_15001_sep16.dat',usecols=(10,))
+varlat=np.loadtxt(fn,usecols=(10,))
 
 # load error (variance in longitude)
-varlon=np.loadtxt('buoydata_15001_sep16.dat',usecols=(11,))
+varlon=np.loadtxt(fn,usecols=(11,))
 
 # load error (variance in temperature)
-vartemp=np.loadtxt('buoydata_15001_sep16.dat',usecols=(12,))
+vartemp=np.loadtxt(fn,usecols=(12,))
 
 
 #print('id',id)

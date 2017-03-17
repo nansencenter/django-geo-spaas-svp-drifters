@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import datetime
 from dateutil.parser import parse
@@ -5,6 +6,7 @@ from dateutil.parser import parse
 import pythesint as pti
 
 from django.db import models
+from django.utils import timezone
 from django.contrib.gis.geos import LineString
 
 from geospaas.utils import validate_uri, nansat_filename
@@ -16,18 +18,21 @@ from geospaas.vocabularies.models import ISOTopicCategory
 from geospaas.catalog.models import GeographicLocation
 from geospaas.catalog.models import DatasetURI, Source, Dataset
 
-# Demo filename: /vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
+# Demo uri: file://localhost/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
 class SVPDrifterManager(models.Manager):
-    def add_svp_drifter_data_from_file(self, uri, period_days=1):
+
+    def add_svp_drifters(self, uri_metadata, uri_data):
         ''' Create all datasets from given file and add corresponding metadata
 
         Parameters:
         ----------
-            uri : str
+            uri_data : str
                   URI to file
+            uri_metadata : str
+                  URI to metadata file
         Returns:
         -------
-            dataset and flag
+            count : Number of ingested buoy datasets
         '''
         # set metadata
         pp = Platform.objects.get(short_name='BUOYS')
@@ -36,38 +41,62 @@ class SVPDrifterManager(models.Manager):
         dc = DataCenter.objects.get(short_name = 'DOC/NOAA/OAR/AOML')
         iso = ISOTopicCategory.objects.get(name='Oceans')
 
-        # read dates, lon, lat from file
-        dates, lon, lat = get_dates_lon_lat(uri)
-        dates0 = parse(dates[0])
-        dates1 = parse(dates[-1])
-
-        # add all 1-day chunks to database
-        date = datetime.datetime(dates0.year, dates0.month, dates0.day)
-        cnt = 0
-        while date < dates1:
-            start_date = date
-            end_date = start_date + datetime.timedelta(period_days)
-            lon, lat = get_lon_lat(uri, start_date, end_date)
-            self.add_trajectory(uri, start_date, end_date, lon, lat, src, dc, iso)
-            date = end_date
-            cnt += 1
-
-        return cnt
-
-    def add_trajectory(self, uri, start_date, end_date, lon, lat, src, dc, iso):
-        ''' Add one chunk of trajectory to database '''
-        line1 = LineString((zip(lon, lat)))
-        geolocation = GeographicLocation.objects.get_or_create(geometry=line1)[0]
-
-        ds = Dataset.objects.get_or_create(
-                    entry_title=uri + start_date.strftime('_%Y-%m-%d'),
+        #'ID WMC_id experimentNumber BuoyType deploymentDate deploymetTime deplat deplon endDate endTime endlat endlon drogueLostDate drogueLostTime deathReason'
+        #'11846540 4400770  2222    SVPB  2012/07/17 10:00   59.61   317.61 2015/11/29 15:00   57.66   352.24 2012/11/11 04:04  1\n'
+        # Death reasons: 0=buoy still alive, 1=buoy ran aground, 2=picked up by
+        # vessel, 3=stop transmitting, 4=sporadic transmissions, 5=bad
+        # batteries, 6=inactive status
+        # Get and loop drifter identification numbers
+        count = 0
+        with open(nansat_filename(uri_metadata)) as ff:
+            for line in ff:
+                m = re.search('^\s*(\d+)\s+\d+\s+\d+\s+(\w+)\s+(\d{4}/\d{2}/\d{2})\s+(\d{2}:\d{2})\s+\-?\d+\.\d+\s+\-?\d+\.\d+\s+(\d{4}/\d{2}/\d{2})\s+(\d{2}:\d{2})\s+.*\n$',line)
+                id = int(m.group(1))
+                buoyType = m.group(2)
+                deploymentDate = m.group(3)
+                deploymentTime = m.group(4)
+                endDate = m.group(5)
+                endTime = m.group(6)
+                # Add drifter trajectory and metadata to database
+                ds, created = Dataset.objects.get_or_create(
+                    entry_title = '%s drifter no. %d'%(buoyType, id),
                     ISO_topic_category = iso,
                     data_center = dc,
-                    summary = uri,
-                    time_coverage_start=start_date,
-                    time_coverage_end=end_date,
-                    source=src,
-                    geographic_location=geolocation)[0]
+                    summary = '',
+                    time_coverage_start = \
+                            timezone.datetime.strptime(deploymentDate +
+                                deploymentTime, '%Y/%m/%d%H:%M').replace(
+                                    tzinfo=timezone.utc),
+                    time_coverage_end = \
+                            timezone.datetime.strptime(endDate + endTime,
+                                '%Y/%m/%d%H:%M').replace(tzinfo=timezone.utc),
+                    source=src)
+                meta_uri, muc = DatasetURI.objects.get_or_create(uri=uri_metadata, dataset=ds)
+                data_uri, duc = DatasetURI.objects.get_or_create(uri=uri_data, dataset=ds)
+                if created:
+                    ds.geographic_location=self.trajectory(id, nansat_filename(uri_data))
+                    ds.save()
+                    count += 1
+            ff.close()
+        return count
 
-        ds_uri = DatasetURI.objects.get_or_create(uri=uri, dataset=ds)[0]
+    def trajectory(self, id, datfile):
+        ''' Add trajectory to database
+
+        Read id, month, day, year, latitude, longitude, temperature, zonal velocity, meridional velocity, speed")
+        '''
+        lonlat = []
+        with open(datfile) as ff:
+            for line in ff:
+                if '%d'%id in line:
+                    m = re.search('^\s*(\d+)\s+\d+\s+\d+\.?\d+?\s+\d+\s+(\-?\d+\.\d+)\s+(\-?\d+\.\d+)\s+.*\n$',line)
+                    if m and int(m.group(1))==id:
+                        lon = float(m.group(3))
+                        lat = float(m.group(2))
+                        lonlat.append((lon, lat))
+            ff.close()
+        line1 = LineString((lonlat))
+        geolocation = GeographicLocation.objects.get_or_create(geometry=line1)[0]
+
+        return geolocation
 
