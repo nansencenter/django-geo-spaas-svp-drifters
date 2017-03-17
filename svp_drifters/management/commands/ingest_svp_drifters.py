@@ -13,6 +13,6 @@ class Command(BaseCommand):
 
         uris = uris_from_args(*args)
         count = SVPDrifter.objects.add_svp_drifters(uris[0], uris[1],
-                maxnum=500)
+                maxnum=50)
         print 'Added %d new drifter datasets'%count
 
