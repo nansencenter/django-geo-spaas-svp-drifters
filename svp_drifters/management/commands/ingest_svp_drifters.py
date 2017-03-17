@@ -12,6 +12,7 @@ class Command(BaseCommand):
             raise IOError('Please provide two filenames')
 
         uris = uris_from_args(*args)
-        count = SVPDrifter.objects.add_svp_drifters(uris[0], uris[1])
+        count = SVPDrifter.objects.add_svp_drifters(uris[0], uris[1],
+                maxnum=500)
         print 'Added %d new drifter datasets'%count
 

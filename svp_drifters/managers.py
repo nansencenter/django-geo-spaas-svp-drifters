@@ -21,7 +21,7 @@ from geospaas.catalog.models import DatasetURI, Source, Dataset
 # Demo uri: file://localhost/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
 class SVPDrifterManager(models.Manager):
 
-    def add_svp_drifters(self, uri_metadata, uri_data):
+    def add_svp_drifters(self, uri_metadata, uri_data, maxnum=0):
         ''' Create all datasets from given file and add corresponding metadata
 
         Parameters:
@@ -77,6 +77,8 @@ class SVPDrifterManager(models.Manager):
                     ds.geographic_location=self.trajectory(id, nansat_filename(uri_data))
                     ds.save()
                     count += 1
+                    if maxnum and count>maxnum:
+                        break
             ff.close()
         return count
 
