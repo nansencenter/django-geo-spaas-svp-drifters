@@ -21,15 +21,20 @@ from geospaas.catalog.models import DatasetURI, Source, Dataset
 # Demo uri: file://localhost/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
 class SVPDrifterManager(models.Manager):
 
-    def add_svp_drifters(self, uri_metadata, uri_data, maxnum=0):
+    def add_svp_drifters(self, uri_metadata, uri_data,
+            time_coverage_start=None, time_coverage_end=None, maxnum=None):
         ''' Create all datasets from given file and add corresponding metadata
 
         Parameters:
         ----------
             uri_data : str
-                  URI to file
+                URI to file
             uri_metadata : str
-                  URI to metadata file
+                URI to metadata file
+            time_coverage_start : timezone.datetime object
+                Optional start time for ingestion
+            time_coverage_end : timezone.datetime object
+                Optional end time for ingestion
         Returns:
         -------
             count : Number of ingested buoy datasets
@@ -53,23 +58,27 @@ class SVPDrifterManager(models.Manager):
                 m = re.search('^\s*(\d+)\s+\d+\s+\d+\s+(\w+)\s+(\d{4}/\d{2}/\d{2})\s+(\d{2}:\d{2})\s+\-?\d+\.\d+\s+\-?\d+\.\d+\s+(\d{4}/\d{2}/\d{2})\s+(\d{2}:\d{2})\s+.*\n$',line)
                 id = int(m.group(1))
                 buoyType = m.group(2)
-                deploymentDate = m.group(3)
-                deploymentTime = m.group(4)
-                endDate = m.group(5)
-                endTime = m.group(6)
+                deploymentDateTime = timezone.datetime.strptime(m.group(3) +
+                                m.group(4), '%Y/%m/%d%H:%M').replace(
+                                    tzinfo=timezone.utc)
+                endDateTime = timezone.datetime.strptime(m.group(5) +
+                        m.group(6),
+                        '%Y/%m/%d%H:%M').replace(tzinfo=timezone.utc)
+                # Skip drifter if it's not within the required timespan
+                if (time_coverage_start and
+                        endDateTime<time_coverage_start):
+                    continue
+                if (time_coverage_end and
+                        deploymentDateTime>time_coverage_end):
+                    continue
                 # Add drifter trajectory and metadata to database
                 ds, created = Dataset.objects.get_or_create(
                     entry_title = '%s drifter no. %d'%(buoyType, id),
                     ISO_topic_category = iso,
                     data_center = dc,
                     summary = '',
-                    time_coverage_start = \
-                            timezone.datetime.strptime(deploymentDate +
-                                deploymentTime, '%Y/%m/%d%H:%M').replace(
-                                    tzinfo=timezone.utc),
-                    time_coverage_end = \
-                            timezone.datetime.strptime(endDate + endTime,
-                                '%Y/%m/%d%H:%M').replace(tzinfo=timezone.utc),
+                    time_coverage_start = deploymentDateTime,
+                    time_coverage_end = endDateTime,
                     source=src)
                 meta_uri, muc = DatasetURI.objects.get_or_create(uri=uri_metadata, dataset=ds)
                 data_uri, duc = DatasetURI.objects.get_or_create(uri=uri_data, dataset=ds)
