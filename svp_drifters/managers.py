@@ -19,13 +19,17 @@ from geospaas.vocabularies.models import ISOTopicCategory
 from geospaas.catalog.models import GeographicLocation
 from geospaas.catalog.models import DatasetURI, Source, Dataset
 
+CHUNK_DURATION = 5 # days
+
 # Demo uri: file://localhost/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
 class SVPDrifterManager(models.Manager):
 
     chunk_duration = 5
 
     def add_svp_drifters(self, uri_metadata, uri_data,
-            time_coverage_start=None, time_coverage_end=None, maxnum=None):
+            time_coverage_start=None,
+            time_coverage_end=None,
+            maxnum=None, minlat=-90, maxlat=90, minlon=0, maxlon=360):
         ''' Create all datasets from given file and add corresponding metadata
 
         Parameters:
@@ -64,106 +68,88 @@ class SVPDrifterManager(models.Manager):
         #dep_time = np.loadtxt(metafile,usecols=(5,), dtype='str')
 
         metafile = nansat_filename(uri_metadata)
-        data = pd.read_csv(metafile, sep="\s+", header = None, names=['id',
+        datafile = nansat_filename(uri_data)
+        print 'Reading large files ...'
+        names = ['id',
             'WMC_id', 'expNum', 'buoyType', 'depDate', 'depTime', 'depLat',
             'depLon', 'endDate', 'endTime', 'endLat', 'endLon',
-            'drogueLostDate', 'drogueLostTime', 'deathReason'])
-        ids = []
-        for i in range(data.shape[0]):
-            deploymentDateTime = timezone.datetime.strptime(
-                                    data['depDate'][i] + 'T' +
-                                    data['depTime'][i],
-                                    '%Y/%m/%dT%H:%M').replace(tzinfo=
-                                            timezone.utc)
-            endDateTime = timezone.datetime.strptime(
-                                    data['endDate'][i] + 'T' +
-                                    data['endTime'][i],
-                                    '%Y/%m/%dT%H:%M').replace(tzinfo=
-                                            timezone.utc)
-            # Skip drifter if it's not within the required timespan
-            if (time_coverage_start and
-                    endDateTime<time_coverage_start):
+            'drogueLostDate', 'drogueLostTime', 'deathReason']
+        metadata = pd.read_csv(metafile,
+                        delim_whitespace=True,
+                        header = None,
+                        names=names,
+                        usecols=['id', 'buoyType', 'depDate', 'depTime', 'endDate', 'endTime'],
+                        parse_dates={'depDateTime':['depDate', 'depTime'],
+                                     'endDateTime':['endDate', 'endTime']}).to_records()
+        data = pd.read_csv(datafile,
+                            header=None,
+                            delim_whitespace=True,
+                            usecols=[0,1,2,3,4,5],
+                            names=['id', 'month', 'day', 'year', 'latitude', 'longitude'],
+                            ).to_records()
+        hour = np.remainder(data['day'], np.floor(data['day']))*24
+        df = pd.DataFrame({'year': data['year'],
+                           'month': data['month'],
+                           'day': data['day'],
+                           'hour': hour})
+        dates = pd.to_datetime(df).as_matrix().astype('<M8[h]')
+        print 'OK!'
+
+        # set time_coverage_start/end as np.datetime64
+        if time_coverage_start is None:
+            time_coverage_start = metadata['depDateTime'].min()
+        else:
+            time_coverage_start = np.datetime64(time_coverage_start)
+        if time_coverage_end is None:
+            time_coverage_end = metadata['endDateTime'].max()
+        else:
+            time_coverage_end = np.datetime64(time_coverage_end)
+
+        # select drifters matching given time period, i.e. which are
+        # NOT taken only before or only after the given period
+        ids = metadata['id'][~((metadata['endDateTime'] < time_coverage_start) +
+                               (metadata['depDateTime'] > time_coverage_end))]
+        cnt = 0
+        for i, drifter_id in enumerate(ids[:maxnum]):
+            buoyType = metadata['buoyType'][metadata['id'] == drifter_id][0]
+
+            # find all valid drifter records for given period
+            gpi = ((data['id']==drifter_id) *
+                   (data['longitude'] >= minlon) *
+                   (data['longitude'] <= maxlon) *
+                   (data['latitude'] >= minlat) *
+                   (data['latitude'] <= maxlat) *
+                   (dates >= time_coverage_start) *
+                   (dates <= time_coverage_end))
+            if len(gpi[gpi]) < 2:
                 continue
-            if (time_coverage_end and
-                    deploymentDateTime>time_coverage_end):
-                continue
-            # Split dataset in chunks
-            t0 = deploymentDateTime
-            while t0<endDateTime:
-                # Add drifter trajectory and metadata to database
-                t1 = t0 + timezone.timedelta(days=self.chunk_duration)
-                ds, created = Dataset.objects.get_or_create(
-                    entry_title = '%s drifter no. %d'%(data['buoyType'][i],
-                        data['id'][i]),
+            chunk_dates = np.arange(dates[gpi][0], dates[gpi][-1], CHUNK_DURATION*24)
+            for j, chunk_date in enumerate(chunk_dates):
+                print 'Add drifter #%d (%d/%d) on %s (%d/%d)' % (drifter_id, i, len(ids), str(chunk_date), j, len(chunk_dates))
+                chunk_gpi = ((dates[gpi] >= chunk_date) *
+                             (dates[gpi] < (chunk_date + CHUNK_DURATION*24)))
+                if len(chunk_gpi[chunk_gpi]) < 2:
+                    continue
+                chunk_lon = data['longitude'][gpi][chunk_gpi]
+                chunk_lat = data['latitude'][gpi][chunk_gpi]
+                geometry = LineString((zip(chunk_lon, chunk_lat)))
+                geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
+                if not geo_cr:
+                    continue
+                ds, ds_cr = Dataset.objects.get_or_create(
+                    entry_title = '%s drifter no. %d' % (
+                                buoyType,
+                                drifter_id),
                     ISO_topic_category = iso,
                     data_center = dc,
                     summary = '',
-                    time_coverage_start = t0,
-                    time_coverage_end = t1,
-                    source=src)
-                meta_uri, muc = DatasetURI.objects.get_or_create(uri=uri_metadata, dataset=ds)
-                data_uri, duc = DatasetURI.objects.get_or_create(uri=uri_data, dataset=ds)
-                t0 = t1
-                if created:
-                    ids.append(data['id'][i])
-            if maxnum and i>=maxnum-1:
-                break
-            #ff.close()
-        ids = list(set(ids))
-        count = self.add_trajectories(ids, nansat_filename(uri_data))
-        return count
-
-    def add_trajectories(self, ids, datfile):
-        ''' Add trajectories to database
-
-        Read id, month, day, year, latitude, longitude, temperature, zonal velocity, meridional velocity, speed")
-        '''
-        data = pd.read_csv(datfile, sep="\s+", header = None, names=['id',
-                'month', 'day', 'year', 'latitude', 'longitude', 'temp', 'u', 'v',
-                'err_lat', 'err_lon', 'err_temp', 'unknown'])
-        count = 0
-        for id in ids:
-            # Get indices of current drifter
-            ind = np.where(data['id']==id)[0]
-            lat = data['latitude'][ind]
-            lon = data['longitude'][ind]
-            year = data['year'][ind]
-            month = data['month'][ind]
-            day = data['day'][ind]
-            hour = np.remainder(day, np.floor(day))*24
-        
-            # Pandas DataFrame - add lat,lon to df?
-            df = pd.DataFrame({'year': year, 'month': month, 'day': np.floor(day),
-                'hour': hour})
-            # Create datetime64 array
-            datetimes = pd.to_datetime(df)
-
-            ## Get rid of missing data (=999.999)
-            #indlon = np.where(lon<=360)[0]
-            #indlat = np.where(lat<=90)[0]
-
-            lat = lat[lon<=360]
-            lon = lon[lon<=360]
-            datetimes = datetimes[lon<=360]
-            lat = lat[lat<=90]
-            lon = lon[lat<=90]
-            datetimes = datetimes[lat<=90]
-
-            drifters = Dataset.objects.filter(entry_title__contains='drifter no. %d'%id)
-            for d in drifters:
-                lonlat = []
-                lond = lon[datetimes>=d.time_coverage_start]
-                lond = lond[datetimes<=d.time_coverage_end]
-                latd = lat[datetimes>=d.time_coverage_start]
-                latd = latd[datetimes<=d.time_coverage_end]
-
-                if lond.size<=1 or latd.size<=1:
-                    continue
-                lonlat = zip(lond, latd)
-                line1 = LineString((lonlat))
-                geolocation = GeographicLocation.objects.get_or_create(geometry=line1)[0]
-                d.geographic_location=geolocation
-                d.save()
-                count += 1
-        return count
-
+                    time_coverage_start = chunk_date.astype(datetime.datetime),
+                    time_coverage_end = (chunk_date + CHUNK_DURATION*24).astype(datetime.datetime),
+                    source=src,
+                    geographic_location=geoloc)
+                    
+                if ds_cr:
+                    cnt += 1
+                    meta_uri, muc = DatasetURI.objects.get_or_create(uri=uri_metadata, dataset=ds)
+                    data_uri, duc = DatasetURI.objects.get_or_create(uri=uri_data, dataset=ds)
+        return cnt
