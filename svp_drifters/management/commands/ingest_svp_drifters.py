@@ -36,11 +36,11 @@ class Command(BaseCommand):
                             help='''Maximum latitutde''')
         parser.add_argument('--minlon',
                             action='store',
-                            default='0',
+                            default='-180',
                             help='''Minimum longitude''')
         parser.add_argument('--maxlon',
                             action='store',
-                            default='360',
+                            default='180',
                             help='''Maximum longitude''')
         parser.add_argument('--maxnum',
                             action='store',
