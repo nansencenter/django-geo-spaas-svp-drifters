@@ -29,7 +29,7 @@ class SVPDrifterManager(models.Manager):
     def add_svp_drifters(self, uri_metadata, uri_data,
             time_coverage_start=None,
             time_coverage_end=None,
-            maxnum=None, minlat=-90, maxlat=90, minlon=0, maxlon=360):
+            maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
         ''' Create all datasets from given file and add corresponding metadata
 
         Parameters:
@@ -87,6 +87,7 @@ class SVPDrifterManager(models.Manager):
                             usecols=[0,1,2,3,4,5],
                             names=['id', 'month', 'day', 'year', 'latitude', 'longitude'],
                             ).to_records()
+        longitude = np.mod(data['longitude']+180,360)-180.
         hour = np.remainder(data['day'], np.floor(data['day']))*24
         df = pd.DataFrame({'year': data['year'],
                            'month': data['month'],
@@ -114,9 +115,11 @@ class SVPDrifterManager(models.Manager):
             buoyType = metadata['buoyType'][metadata['id'] == drifter_id][0]
 
             # find all valid drifter records for given period
+            # Longitudes are shifted from range [0,360] to range [-180,180]
+            # degrees
             gpi = ((data['id']==drifter_id) *
-                   (data['longitude'] >= minlon) *
-                   (data['longitude'] <= maxlon) *
+                   (longitude >= minlon) *
+                   (longitude <= maxlon) *
                    (data['latitude'] >= minlat) *
                    (data['latitude'] <= maxlat) *
                    (dates >= time_coverage_start) *
@@ -130,7 +133,7 @@ class SVPDrifterManager(models.Manager):
                              (dates[gpi] < (chunk_date + CHUNK_DURATION*24)))
                 if len(chunk_gpi[chunk_gpi]) < 2:
                     continue
-                chunk_lon = data['longitude'][gpi][chunk_gpi]
+                chunk_lon = longitude[gpi][chunk_gpi]
                 chunk_lat = data['latitude'][gpi][chunk_gpi]
                 geometry = LineString((zip(chunk_lon, chunk_lat)))
                 geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
