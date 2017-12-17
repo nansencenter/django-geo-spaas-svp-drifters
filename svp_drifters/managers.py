@@ -19,12 +19,11 @@ from geospaas.vocabularies.models import ISOTopicCategory
 from geospaas.catalog.models import GeographicLocation
 from geospaas.catalog.models import DatasetURI, Source, Dataset
 
-CHUNK_DURATION = 5 # days
 
 # Demo uri: file://localhost/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
 class SVPDrifterManager(models.Manager):
 
-    chunk_duration = 5
+    CHUNK_DURATION = 5
 
     def add_svp_drifters(self, uri_metadata, uri_data,
             time_coverage_start=None,
@@ -46,6 +45,8 @@ class SVPDrifterManager(models.Manager):
         -------
             count : Number of ingested buoy datasets
         '''
+
+
         # set metadata
         pp = Platform.objects.get(short_name='BUOYS')
         ii = Instrument.objects.get(short_name = 'DRIFTING BUOYS')
@@ -126,11 +127,11 @@ class SVPDrifterManager(models.Manager):
                    (dates <= time_coverage_end))
             if len(gpi[gpi]) < 2:
                 continue
-            chunk_dates = np.arange(dates[gpi][0], dates[gpi][-1], CHUNK_DURATION*24)
+            chunk_dates = np.arange(dates[gpi][0], dates[gpi][-1], self.CHUNK_DURATION*24)
             for j, chunk_date in enumerate(chunk_dates):
                 print 'Add drifter #%d (%d/%d) on %s (%d/%d)' % (drifter_id, i, len(ids), str(chunk_date), j, len(chunk_dates))
                 chunk_gpi = ((dates[gpi] >= chunk_date) *
-                             (dates[gpi] < (chunk_date + CHUNK_DURATION*24)))
+                             (dates[gpi] < (chunk_date + self.CHUNK_DURATION*24)))
                 if len(chunk_gpi[chunk_gpi]) < 2:
                     continue
                 chunk_lon = longitude[gpi][chunk_gpi]
@@ -147,7 +148,7 @@ class SVPDrifterManager(models.Manager):
                     data_center = dc,
                     summary = '',
                     time_coverage_start = chunk_date.astype(datetime.datetime),
-                    time_coverage_end = (chunk_date + CHUNK_DURATION*24).astype(datetime.datetime),
+                    time_coverage_end = (chunk_date + self.CHUNK_DURATION*24).astype(datetime.datetime),
                     source=src,
                     geographic_location=geoloc)
                     
