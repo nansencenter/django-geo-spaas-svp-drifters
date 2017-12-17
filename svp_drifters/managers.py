@@ -2,12 +2,12 @@ import re
 import numpy as np
 import pandas as pd
 import datetime
+import os
 from dateutil.parser import parse
 
 import pythesint as pti
 
 from django.db import models
-from django.utils import timezone
 from django.contrib.gis.geos import LineString
 
 from geospaas.utils import validate_uri, nansat_filename
@@ -33,10 +33,32 @@ class SVPDrifterManager(models.Manager):
         iso = ISOTopicCategory.objects.get(name='Oceans')
         return src, dc, iso
 
-    def get_or_create(self, uri_metadata, uri_data,
+    def shift_longitude(self, lon):
+        return np.mod(float(lon) + 180, 360) - 180.
+
+    def convert_datetime(self, month, daytime, year):
+        daytime = float(daytime)
+        day = int(daytime // 1)
+        time = int((daytime % 1) / (1. / 24))
+        return datetime.datetime(year=int(year), month=int(month), day=day, hour=time)
+
+    def gen_file_name(self, metadata):
+        time_start = ''.join(metadata[4:6]).replace('/', '').replace(':', '')
+        time_end = ''.join(metadata[8:10]).replace('/', '').replace(':', '')
+        file_name = '_'.join([metadata[3], metadata[0], time_start, time_end]) + '.csv'
+        return file_name
+
+    def read_metadata(self, path):
+        arr = []
+        with open(path, 'r') as meta_file:
+            for line in meta_file:
+                arr.append(line.strip().split())
+        return arr
+
+    def get_or_create(self, metadata_uri, data_uri,
                       time_coverage_start=None,
                       time_coverage_end=None,
-                      maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
+                      maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180,):
         """ Create all datasets from given file and add corresponding metadata
 
         Parameters:
@@ -53,24 +75,47 @@ class SVPDrifterManager(models.Manager):
         -------
             count : Number of ingested buoy datasets
         """
-
-        #'ID WMC_id experimentNumber BuoyType deploymentDate deploymetTime deplat deplon endDate endTime endlat endlon drogueLostDate drogueLostTime deathReason'
-        #'11846540 4400770  2222    SVPB  2012/07/17 10:00   59.61   317.61 2015/11/29 15:00   57.66   352.24 2012/11/11 04:04  1\n'
-        # Death reasons: 0=buoy still alive, 1=buoy ran aground, 2=picked up by
-        # vessel, 3=stop transmitting, 4=sporadic transmissions, 5=bad
-        # batteries, 6=inactive status
-
-        ## Get and loop drifter identification numbers
-        #id = np.loadtxt(metafile,usecols=(0,))
-        #buoyType = np.loadtxt(metafile, usecols=(3,))
-        ## load drifter deployment date
-        #dep_date = np.loadtxt(metafile,usecols=(4,), dtype='str')
-        ## load drifter deployment time
-        #dep_time = np.loadtxt(metafile,usecols=(5,), dtype='str')
-
+        export_path = '/vagrant/shared/test_data'
         source, data_center, iso = self.set_metadata()
-        metafile = nansat_filename(uri_metadata)
-        datafile = nansat_filename(uri_data)
+        metadata_file = nansat_filename(metadata_uri)
+        data_file = nansat_filename(data_uri)
+        print(metadata_file, data_file)
+
+        convert_datetime_vctrz = np.vectorize(self.convert_datetime)
+        data = []
+
+        # Metadata info: http://www.aoml.noaa.gov/envids/gld/general_info/dir_table.php
+        metadata = self.read_metadata(metadata_uri)
+
+        with open(self.data_uri, 'r') as data_file:
+            print('Open file: %s' % self.data_uri)
+            for line in data_file:
+                line = line.strip().split()
+                if line[0] == metadata[0][0]:
+                    data.append(line)
+                else:
+                    bouy = metadata.pop(0)
+                    data = np.array(data)
+                    # Export
+                    file_name = self.gen_file_name(bouy)
+                    print file_name
+                    np.savetxt(os.path.join(export_path, file_name), data,
+                               header=';'.join(self.COL_NAMES), fmt='%s', delimiter=';')
+                    # Create timestamp from row data
+                    timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
+                    dt = datetime.timedelta(days=self.CHUNK_DURATION)
+                    start = timestamp.min()
+                    end = start + dt
+                    while end < timestamp.max():
+                        subset = data[(timestamp >= start) & (timestamp <= end)]
+                        geometry = LineString(zip(data[:, 5], data[:, 4]))
+                        start = end
+                        end += dt
+
+                        return subset, (start, end)
+
+        return data, timestamp
+
         print 'Reading large files ...'
         names = ['id',
             'WMC_id', 'expNum', 'buoyType', 'depDate', 'depTime', 'depLat',
