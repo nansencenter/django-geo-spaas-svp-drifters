@@ -8,7 +8,7 @@ from dateutil.parser import parse
 import pythesint as pti
 
 from django.db import models
-from django.contrib.gis.geos import LineString
+from django.contrib.gis.geos import LineString,MultiLineString
 
 from geospaas.utils import validate_uri, nansat_filename
 
@@ -58,7 +58,7 @@ class SVPDrifterManager(models.Manager):
     def get_or_create(self, metadata_uri, data_uri,
                       time_coverage_start=None,
                       time_coverage_end=None,
-                      maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180,):
+                      maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
         """ Create all datasets from given file and add corresponding metadata
 
         Parameters:
@@ -75,7 +75,11 @@ class SVPDrifterManager(models.Manager):
         -------
             count : Number of ingested buoy datasets
         """
-        export_path = '/vagrant/shared/test_data'
+
+        COL_NAMES = ['id', 'month', 'daytime', 'year', 'lat', 'lon', 't', 've', 'vn', 'speed', 'varlat', 'varlon',
+                     'vart']
+
+        export_root = '/vagrant/shared/test_data'
         source, data_center, iso = self.set_metadata()
         metadata_file = nansat_filename(metadata_uri)
         data_file = nansat_filename(data_uri)
@@ -85,121 +89,69 @@ class SVPDrifterManager(models.Manager):
         data = []
 
         # Metadata info: http://www.aoml.noaa.gov/envids/gld/general_info/dir_table.php
-        metadata = self.read_metadata(metadata_uri)
+        # Data: http://www.aoml.noaa.gov/envids/gld/FtpMetadataInstructions.php
+        metadata = self.read_metadata(metadata_file)
 
-        with open(self.data_uri, 'r') as data_file:
-            print('Open file: %s' % self.data_uri)
-            for line in data_file:
+        # Read file with buoy data
+        # Metadata info: http://www.aoml.noaa.gov/envids/gld/general_info/dir_table.php
+        # Data: http://www.aoml.noaa.gov/envids/gld/general_info/krig_table.php
+        # Attention! The columns in the description are not exactly correct
+        print(data, type(data))
+        with open(data_file, 'r') as data_f:
+            print('Open file: %s' % data_uri)
+            for line in data_f:
                 line = line.strip().split()
+                # If buoy id form the line is equal to buoy id from first row in metadata
                 if line[0] == metadata[0][0]:
+                    # Then add this line to arr
                     data.append(line)
+                # Else we accumulated all information about one buoy
+                # and want to process that
                 else:
-                    bouy = metadata.pop(0)
+
+                    # Extract metadata about the buoy from meta file
+                    buoy = metadata.pop(0)
                     data = np.array(data)
-                    # Export
-                    file_name = self.gen_file_name(bouy)
-                    print file_name
-                    np.savetxt(os.path.join(export_path, file_name), data,
-                               header=';'.join(self.COL_NAMES), fmt='%s', delimiter=';')
+                    # Export buoy data to csv
+                    file_name = self.gen_file_name(buoy)
+                    export_path = os.path.join(export_root, file_name)
+                    print('Export bouy #%s to: %s' % (buoy[0], export_path))
+                    np.savetxt(export_path, data,
+                               header=';'.join(COL_NAMES), fmt='%s', delimiter=';')
                     # Create timestamp from row data
                     timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
+                    # Separate whole buoy dataset for several intervals with <chunk_duration> step
                     dt = datetime.timedelta(days=self.CHUNK_DURATION)
+                    # Start and end datetime for subset
                     start = timestamp.min()
                     end = start + dt
                     while end < timestamp.max():
+                        print(start, end)
                         subset = data[(timestamp >= start) & (timestamp <= end)]
-                        geometry = LineString(zip(data[:, 5], data[:, 4]))
+                        test = zip([self.shift_longitude(float(x)) for x in data[:, 5]],
+                                                   [float(x) for x in data[:, 4]])
+                        geometry = MultiLineString(*test)
+                        geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
+
+                        print(geo_cr, geoloc)
+                        if not geo_cr:
+                            continue
+
+                        ds, ds_cr = Dataset.objects.get_or_create(
+                            entry_title='%s drifter no. %s' % (buoy[3], buoy[0]),
+                            ISO_topic_category=iso,
+                            data_center=data_center,
+                            summary='',
+                            time_coverage_start=start,
+                            time_coverage_end=end,
+                            source=source,
+                            geographic_location=geoloc)
+                        print(ds, ds_cr)
+                        if ds_cr:
+                            meta_uri, muc = DatasetURI.objects.get_or_create(uri=metadata_file, dataset=ds)
+                            data_uri, duc = DatasetURI.objects.get_or_create(uri=export_root, dataset=ds)
                         start = end
-                        end += dt
+                        end = end + dt
+                    data = list()
 
-                        return subset, (start, end)
-
-        return data, timestamp
-
-        print 'Reading large files ...'
-        names = ['id',
-            'WMC_id', 'expNum', 'buoyType', 'depDate', 'depTime', 'depLat',
-            'depLon', 'endDate', 'endTime', 'endLat', 'endLon',
-            'drogueLostDate', 'drogueLostTime', 'deathReason']
-        metadata = pd.read_csv(metafile,
-                        delim_whitespace=True,
-                        header = None,
-                        names=names,
-                        usecols=['id', 'buoyType', 'depDate', 'depTime', 'endDate', 'endTime'],
-                        parse_dates={'depDateTime':['depDate', 'depTime'],
-                                     'endDateTime':['endDate', 'endTime']}).to_records()
-        data = pd.read_csv(datafile,
-                            header=None,
-                            delim_whitespace=True,
-                            usecols=[0,1,2,3,4,5],
-                            names=['id', 'month', 'day', 'year', 'latitude', 'longitude'],
-                            ).to_records()
-        longitude = np.mod(data['longitude']+180,360)-180.
-        hour = np.remainder(data['day'], np.floor(data['day']))*24
-        df = pd.DataFrame({'year': data['year'],
-                           'month': data['month'],
-                           'day': data['day'],
-                           'hour': hour})
-        dates = pd.to_datetime(df).as_matrix().astype('<M8[h]')
-        print 'OK!'
-
-        # set time_coverage_start/end as np.datetime64
-        if time_coverage_start is None:
-            time_coverage_start = metadata['depDateTime'].min()
-        else:
-            time_coverage_start = np.datetime64(time_coverage_start)
-        if time_coverage_end is None:
-            time_coverage_end = metadata['endDateTime'].max()
-        else:
-            time_coverage_end = np.datetime64(time_coverage_end)
-
-        # select drifters matching given time period, i.e. which are
-        # NOT taken only before or only after the given period
-        ids = metadata['id'][~((metadata['endDateTime'] < time_coverage_start) +
-                               (metadata['depDateTime'] > time_coverage_end))]
-        cnt = 0
-        for i, drifter_id in enumerate(ids[:maxnum]):
-            buoyType = metadata['buoyType'][metadata['id'] == drifter_id][0]
-
-            # find all valid drifter records for given period
-            # Longitudes are shifted from range [0,360] to range [-180,180]
-            # degrees
-            gpi = ((data['id']==drifter_id) *
-                   (longitude >= minlon) *
-                   (longitude <= maxlon) *
-                   (data['latitude'] >= minlat) *
-                   (data['latitude'] <= maxlat) *
-                   (dates >= time_coverage_start) *
-                   (dates <= time_coverage_end))
-            if len(gpi[gpi]) < 2:
-                continue
-            chunk_dates = np.arange(dates[gpi][0], dates[gpi][-1], self.CHUNK_DURATION*24)
-            for j, chunk_date in enumerate(chunk_dates):
-                print 'Add drifter #%d (%d/%d) on %s (%d/%d)' % (drifter_id, i, len(ids), str(chunk_date), j, len(chunk_dates))
-                chunk_gpi = ((dates[gpi] >= chunk_date) *
-                             (dates[gpi] < (chunk_date + self.CHUNK_DURATION*24)))
-                if len(chunk_gpi[chunk_gpi]) < 2:
-                    continue
-                chunk_lon = longitude[gpi][chunk_gpi]
-                chunk_lat = data['latitude'][gpi][chunk_gpi]
-                geometry = LineString((zip(chunk_lon, chunk_lat)))
-                geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
-                if not geo_cr:
-                    continue
-                ds, ds_cr = Dataset.objects.get_or_create(
-                    entry_title = '%s drifter no. %d' % (
-                                buoyType,
-                                drifter_id),
-                    ISO_topic_category = iso,
-                    data_center=data_center,
-                    summary = '',
-                    time_coverage_start = chunk_date.astype(datetime.datetime),
-                    time_coverage_end = (chunk_date + self.CHUNK_DURATION*24).astype(datetime.datetime),
-                    source=source,
-                    geographic_location=geoloc)
-                    
-                if ds_cr:
-                    cnt += 1
-                    meta_uri, muc = DatasetURI.objects.get_or_create(uri=uri_metadata, dataset=ds)
-                    data_uri, duc = DatasetURI.objects.get_or_create(uri=uri_data, dataset=ds)
-        return cnt
+        return 'ok'
