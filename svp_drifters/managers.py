@@ -25,10 +25,18 @@ class SVPDrifterManager(models.Manager):
 
     CHUNK_DURATION = 5
 
+    def set_metadata(self):
+        pp = Platform.objects.get(short_name='BUOYS')
+        ii = Instrument.objects.get(short_name='DRIFTING BUOYS')
+        src = Source.objects.get_or_create(platform=pp, instrument=ii)[0]
+        dc = DataCenter.objects.get(short_name='DOC/NOAA/OAR/AOML')
+        iso = ISOTopicCategory.objects.get(name='Oceans')
+        return src, dc, iso
+
     def get_or_create(self, uri_metadata, uri_data,
-                         time_coverage_start=None,
-                         time_coverage_end=None,
-                         maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
+                      time_coverage_start=None,
+                      time_coverage_end=None,
+                      maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
         """ Create all datasets from given file and add corresponding metadata
 
         Parameters:
@@ -46,13 +54,6 @@ class SVPDrifterManager(models.Manager):
             count : Number of ingested buoy datasets
         """
 
-        # set metadata
-        pp = Platform.objects.get(short_name='BUOYS')
-        ii = Instrument.objects.get(short_name = 'DRIFTING BUOYS')
-        src = Source.objects.get_or_create(platform = pp, instrument = ii)[0]
-        dc = DataCenter.objects.get(short_name = 'DOC/NOAA/OAR/AOML')
-        iso = ISOTopicCategory.objects.get(name='Oceans')
-
         #'ID WMC_id experimentNumber BuoyType deploymentDate deploymetTime deplat deplon endDate endTime endlat endlon drogueLostDate drogueLostTime deathReason'
         #'11846540 4400770  2222    SVPB  2012/07/17 10:00   59.61   317.61 2015/11/29 15:00   57.66   352.24 2012/11/11 04:04  1\n'
         # Death reasons: 0=buoy still alive, 1=buoy ran aground, 2=picked up by
@@ -67,6 +68,7 @@ class SVPDrifterManager(models.Manager):
         ## load drifter deployment time
         #dep_time = np.loadtxt(metafile,usecols=(5,), dtype='str')
 
+        source, data_center, iso = self.set_metadata()
         metafile = nansat_filename(uri_metadata)
         datafile = nansat_filename(uri_data)
         print 'Reading large files ...'
@@ -144,11 +146,11 @@ class SVPDrifterManager(models.Manager):
                                 buoyType,
                                 drifter_id),
                     ISO_topic_category = iso,
-                    data_center = dc,
+                    data_center=data_center,
                     summary = '',
                     time_coverage_start = chunk_date.astype(datetime.datetime),
                     time_coverage_end = (chunk_date + self.CHUNK_DURATION*24).astype(datetime.datetime),
-                    source=src,
+                    source=source,
                     geographic_location=geoloc)
                     
                 if ds_cr:
