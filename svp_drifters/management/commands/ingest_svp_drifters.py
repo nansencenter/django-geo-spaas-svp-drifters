@@ -59,7 +59,7 @@ class Command(BaseCommand):
         maxnum = eval(options['maxnum'])
         
         uris = uris_from_args(args[0], args[1])
-        count = SVPDrifter.objects.add_svp_drifters(uris[0], uris[1],
+        count = SVPDrifter.objects.get_or_create(uris[0], uris[1],
                 time_coverage_start=start,
                 time_coverage_end=stop,
                 minlat=minlat,

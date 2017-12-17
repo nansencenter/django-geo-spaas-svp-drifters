@@ -25,11 +25,11 @@ class SVPDrifterManager(models.Manager):
 
     CHUNK_DURATION = 5
 
-    def add_svp_drifters(self, uri_metadata, uri_data,
-            time_coverage_start=None,
-            time_coverage_end=None,
-            maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
-        ''' Create all datasets from given file and add corresponding metadata
+    def get_or_create(self, uri_metadata, uri_data,
+                         time_coverage_start=None,
+                         time_coverage_end=None,
+                         maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
+        """ Create all datasets from given file and add corresponding metadata
 
         Parameters:
         ----------
@@ -44,8 +44,7 @@ class SVPDrifterManager(models.Manager):
         Returns:
         -------
             count : Number of ingested buoy datasets
-        '''
-
+        """
 
         # set metadata
         pp = Platform.objects.get(short_name='BUOYS')
