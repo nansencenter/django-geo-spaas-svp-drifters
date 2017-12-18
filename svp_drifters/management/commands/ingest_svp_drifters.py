@@ -53,7 +53,6 @@ class Command(BaseCommand):
                             help='''Maximum number of drifters''')
 
     def handle(self, *args, **options):
-        print(options)
         if not options['data_file'] or not options['metadata_file']:
             raise IOError('Please provide two filenames')
 
@@ -71,5 +70,5 @@ class Command(BaseCommand):
                                                  minlat=minlat, maxlat=maxlat,
                                                  minlon=minlon, maxlon=maxlon,
                                                  maxnum=maxnum)
-        print 'Added %d new drifter datasets' % count
+        print 'Added %s new drifter datasets' % count
 

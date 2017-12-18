@@ -1,14 +1,10 @@
-import re
 import numpy as np
-import pandas as pd
 import datetime
 import os
-from dateutil.parser import parse
-
 import pythesint as pti
 
 from django.db import models
-from django.contrib.gis.geos import LineString,MultiLineString
+from django.contrib.gis.geos import LineString
 
 from geospaas.utils import validate_uri, nansat_filename
 
@@ -20,7 +16,6 @@ from geospaas.catalog.models import GeographicLocation
 from geospaas.catalog.models import DatasetURI, Source, Dataset
 
 
-# Demo uri: file://localhost/vagrant/shared/test_data/drifters/buoydata_15001_sep16.dat
 class SVPDrifterManager(models.Manager):
 
     CHUNK_DURATION = 5
@@ -59,7 +54,7 @@ class SVPDrifterManager(models.Manager):
                       time_coverage_start=None,
                       time_coverage_end=None,
                       maxnum=None, minlat=-90, maxlat=90, minlon=-180, maxlon=180):
-        """ Create all datasets from given file and add corresponding metadata
+        """ Create al''l datasets from given file and add corresponding metadata
 
         Parameters:
         ----------
@@ -83,7 +78,6 @@ class SVPDrifterManager(models.Manager):
         source, data_center, iso = self.set_metadata()
         metadata_file = nansat_filename(metadata_uri)
         data_file = nansat_filename(data_uri)
-        print(metadata_file, data_file)
 
         convert_datetime_vctrz = np.vectorize(self.convert_datetime)
         data = []
@@ -96,7 +90,6 @@ class SVPDrifterManager(models.Manager):
         # Metadata info: http://www.aoml.noaa.gov/envids/gld/general_info/dir_table.php
         # Data: http://www.aoml.noaa.gov/envids/gld/general_info/krig_table.php
         # Attention! The columns in the description are not exactly correct
-        print(data, type(data))
         with open(data_file, 'r') as data_f:
             print('Open file: %s' % data_uri)
             for line in data_f:
@@ -115,7 +108,7 @@ class SVPDrifterManager(models.Manager):
                     # Export buoy data to csv
                     file_name = self.gen_file_name(buoy)
                     export_path = os.path.join(export_root, file_name)
-                    print('Export bouy #%s to: %s' % (buoy[0], export_path))
+                    print('Export buoy #%s data to: %s' % (buoy[0], export_path), ' Left %s buoys' % len(metadata))
                     np.savetxt(export_path, data,
                                header=';'.join(COL_NAMES), fmt='%s', delimiter=';')
                     # Create timestamp from row data
@@ -126,16 +119,11 @@ class SVPDrifterManager(models.Manager):
                     start = timestamp.min()
                     end = start + dt
                     while end < timestamp.max():
-                        print(start, end)
                         subset = data[(timestamp >= start) & (timestamp <= end)]
-                        test = zip([self.shift_longitude(float(x)) for x in data[:, 5]],
-                                                   [float(x) for x in data[:, 4]])
-                        geometry = MultiLineString(*test)
+                        test = zip([self.shift_longitude(float(x)) for x in subset[:, 5]],
+                                   [float(x) for x in subset[:, 4]])
+                        geometry = LineString(test, srid=4326)
                         geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
-
-                        print(geo_cr, geoloc)
-                        if not geo_cr:
-                            continue
 
                         ds, ds_cr = Dataset.objects.get_or_create(
                             entry_title='%s drifter no. %s' % (buoy[3], buoy[0]),
@@ -146,12 +134,10 @@ class SVPDrifterManager(models.Manager):
                             time_coverage_end=end,
                             source=source,
                             geographic_location=geoloc)
-                        print(ds, ds_cr)
                         if ds_cr:
                             meta_uri, muc = DatasetURI.objects.get_or_create(uri=metadata_file, dataset=ds)
-                            data_uri, duc = DatasetURI.objects.get_or_create(uri=export_root, dataset=ds)
+                            data_uri, duc = DatasetURI.objects.get_or_create(uri=export_path, dataset=ds)
                         start = end
                         end = end + dt
                     data = list()
-
-        return 'ok'
+        return 0
