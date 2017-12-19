@@ -8,17 +8,15 @@ from django.contrib.gis.geos import LineString
 
 from geospaas.utils import validate_uri, nansat_filename
 
-from geospaas.vocabularies.models import Platform
-from geospaas.vocabularies.models import Instrument
-from geospaas.vocabularies.models import DataCenter
-from geospaas.vocabularies.models import ISOTopicCategory
-from geospaas.catalog.models import GeographicLocation
-from geospaas.catalog.models import DatasetURI, Source, Dataset
+from geospaas.vocabularies.models import Platform, Instrument, DataCenter, ISOTopicCategory
+from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Dataset
 
 
 class SVPDrifterManager(models.Manager):
 
     CHUNK_DURATION = 5
+    COL_NAMES = ['id', 'month', 'daytime', 'year', 'lat', 'lon', 't',
+                 've', 'vn', 'speed', 'varlat', 'varlon', 'vart']
 
     def set_metadata(self):
         pp = Platform.objects.get(short_name='BUOYS')
@@ -50,6 +48,12 @@ class SVPDrifterManager(models.Manager):
                 arr.append(line.strip().split())
         return arr
 
+    def export(self, export_root, metadata, data):
+        export_path = os.path.join(export_root, self.gen_file_name(metadata))
+        print('Export buoy #%s data to: %s | Left %s buoys' % (metadata[0], export_path, len(metadata)))
+        np.savetxt(export_path, data, header=';'.join(self.COL_NAMES), fmt='%s', delimiter=';')
+        return export_path
+
     def get_or_create(self, metadata_uri, data_uri,
                       time_coverage_start=None,
                       time_coverage_end=None,
@@ -70,9 +74,6 @@ class SVPDrifterManager(models.Manager):
         -------
             count : Number of ingested buoy datasets
         """
-
-        COL_NAMES = ['id', 'month', 'daytime', 'year', 'lat', 'lon', 't', 've', 'vn', 'speed', 'varlat', 'varlon',
-                     'vart']
 
         export_root = '/vagrant/shared/test_data'
         source, data_center, iso = self.set_metadata()
@@ -105,12 +106,8 @@ class SVPDrifterManager(models.Manager):
                     # Extract metadata about the buoy from meta file
                     buoy = metadata.pop(0)
                     data = np.array(data)
-                    # Export buoy data to csv
-                    file_name = self.gen_file_name(buoy)
-                    export_path = os.path.join(export_root, file_name)
-                    print('Export buoy #%s data to: %s' % (buoy[0], export_path), ' Left %s buoys' % len(metadata))
-                    np.savetxt(export_path, data,
-                               header=';'.join(COL_NAMES), fmt='%s', delimiter=';')
+                    # Export buoy data to csv and get path to file
+                    export_path = self.export(export_root, buoy, data)
                     # Create timestamp from row data
                     timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
                     # Separate whole buoy dataset for several intervals with <chunk_duration> step
