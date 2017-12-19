@@ -11,6 +11,7 @@ import os
 
 class SVPDrifterModelTest(TestCase):
     fixtures = ['vocabularies']
+    METADATA_PATH = '/vagrant/shared/src/django-geo-spaas-svp-drifters/test_data/dirfl_1_5000_test.dat'
 
     def test_set_metadata(self):
         src, dc, iso = SVPDrifter.objects.set_metadata()
@@ -52,8 +53,14 @@ class SVPDrifterModelTest(TestCase):
                 self.assertEqual(converted_date, manual_date)
 
     def test_read_metadata(self):
-        metadata_path = '/vagrant/shared/src/django-geo-spaas-svp-drifters/test_data/dirfl_1_5000_test.dat'
-        metadata = SVPDrifter.objects.read_metadata(metadata_path)
+        metadata = SVPDrifter.objects.read_metadata(self.METADATA_PATH)
         self.assertIsInstance(metadata, list)
         self.assertEqual(len(metadata), 3)
         self.assertEqual(len(metadata[1]), 15)
+
+    def test_gen_file_name(self):
+        test_file_name = 'SVP_7702986_198803070000_198809132355.csv'
+        metadata = SVPDrifter.objects.read_metadata(self.METADATA_PATH)
+        file_name = SVPDrifter.objects.gen_file_name(metadata[0])
+        self.assertIsInstance(file_name, str)
+        self.assertEqual(file_name, test_file_name)
