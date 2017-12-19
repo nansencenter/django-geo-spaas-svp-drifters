@@ -19,3 +19,11 @@ class SVPDrifterModelTest(TestCase):
 
         self.assertIsInstance(iso, ISOTopicCategory)
         self.assertEqual(iso.name, 'Oceans')
+
+    def test_shift_longitude(self):
+        lons360 = range(0, 360, 10)
+        lons180 = range(0, 180, 10) + range(-180, 0, 10)
+
+        shifted_lons360 = [SVPDrifter.objects.shift_longitude(lon) for lon in lons360]
+        self.assertEqual(lons180, shifted_lons360)
+        self.assertIsInstance(shifted_lons360[0], float)
