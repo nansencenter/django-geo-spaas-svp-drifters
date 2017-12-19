@@ -48,6 +48,12 @@ class SVPDrifterManager(models.Manager):
                 arr.append(line.strip().split())
         return arr
 
+    def get_geometry(self, lons, lats):
+        lon_lat = zip([self.shift_longitude(float(x)) for x in lons],
+                      [float(x) for x in lats])
+        geometry = LineString(lon_lat)
+        return geometry
+
     def export(self, export_root, metadata, data):
         export_path = os.path.join(export_root, self.gen_file_name(metadata))
         print('Export buoy #%s data to: %s | Left %s buoys' % (metadata[0], export_path, len(metadata)))
@@ -117,9 +123,7 @@ class SVPDrifterManager(models.Manager):
                     end = start + dt
                     while end < timestamp.max():
                         subset = data[(timestamp >= start) & (timestamp <= end)]
-                        test = zip([self.shift_longitude(float(x)) for x in subset[:, 5]],
-                                   [float(x) for x in subset[:, 4]])
-                        geometry = LineString(test, srid=4326)
+                        geometry = self.get_geometry(lons=subset[:, 5], lats=subset[:, 4])
                         geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
 
                         ds, ds_cr = Dataset.objects.get_or_create(

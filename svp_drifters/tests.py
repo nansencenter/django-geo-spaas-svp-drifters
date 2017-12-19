@@ -1,5 +1,6 @@
 from django.test import TestCase
-from django.conf import settings
+from django.contrib.gis.geos import LineString
+
 from svp_drifters.models import SVPDrifter
 from geospaas.vocabularies.models import Platform, Instrument, DataCenter, ISOTopicCategory
 from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Dataset
@@ -64,3 +65,17 @@ class SVPDrifterModelTest(TestCase):
         file_name = SVPDrifter.objects.gen_file_name(metadata[0])
         self.assertIsInstance(file_name, str)
         self.assertEqual(file_name, test_file_name)
+
+    def test_get_geometry(self):
+        lats = range(0, 12, 2)
+        lons_1 = range(10, 16, 1)
+        geo_1 = LineString(*zip(lons_1, lats))
+        svp_geo_1 = SVPDrifter.objects.get_geometry(lons_1, lats)
+        self.assertEqual(geo_1, svp_geo_1)
+        self.assertIsInstance(svp_geo_1, LineString)
+        lons_2_180 = range(-110, -104, 1)
+        lons_2_360 = range(250, 256, 1)
+        geo_2 = LineString(*zip(lons_2_180, lats))
+        svp_geo_2 = SVPDrifter.objects.get_geometry(lons_2_360, lats)
+        self.assertEqual(geo_2, svp_geo_2)
+
