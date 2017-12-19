@@ -1,11 +1,12 @@
 from django.test import TestCase
-
+from django.conf import settings
 from svp_drifters.models import SVPDrifter
 from geospaas.vocabularies.models import Platform, Instrument, DataCenter, ISOTopicCategory
 from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Dataset
 
 import datetime
 import calendar
+import os
 
 
 class SVPDrifterModelTest(TestCase):
@@ -49,3 +50,10 @@ class SVPDrifterModelTest(TestCase):
                 converted_date = SVPDrifter.objects.convert_datetime(month, daytimes[i], year)
                 manual_date = datetime.datetime(year=int(year), month=int(month), day=days[i], hour=hours[i])
                 self.assertEqual(converted_date, manual_date)
+
+    def test_read_metadata(self):
+        metadata_path = '/vagrant/shared/src/django-geo-spaas-svp-drifters/test_data/dirfl_1_5000_test.dat'
+        metadata = SVPDrifter.objects.read_metadata(metadata_path)
+        self.assertIsInstance(metadata, list)
+        self.assertEqual(len(metadata), 3)
+        self.assertEqual(len(metadata[1]), 15)
