@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 import datetime
 import os
 import pythesint as pti
@@ -15,6 +16,7 @@ from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Data
 class SVPDrifterManager(models.Manager):
 
     CHUNK_DURATION = 5
+    EXPORT_ROOT = '/vagrant/shared/test_data'
     COL_NAMES = ['id', 'month', 'daytime', 'year', 'lat', 'lon', 't',
                  've', 'vn', 'speed', 'varlat', 'varlon', 'vart']
 
@@ -54,9 +56,44 @@ class SVPDrifterManager(models.Manager):
         geometry = LineString(lon_lat)
         return geometry
 
+    def process_data(self, buoy_metadata, data, iso, data_center, source, metadata_path):
+        convert_datetime_vctrz = np.vectorize(self.convert_datetime)
+        data = np.array(data)
+        # Export buoy data to csv and get path to file
+        export_path = self.export(self.EXPORT_ROOT, buoy_metadata, data)
+        # Create timestamp from row data
+        timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
+        # Separate whole buoy dataset for several intervals with <chunk_duration> step
+        dt = datetime.timedelta(days=self.CHUNK_DURATION)
+        # Start and end datetime for subset
+        start = timestamp.min()
+        end = start + dt
+        while end < timestamp.max():
+            subset = data[(timestamp >= start) & (timestamp <= end)]
+            geometry = self.get_geometry(lons=subset[:, 5], lats=subset[:, 4])
+            geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
+
+            ds, ds_cr = Dataset.objects.get_or_create(
+                entry_title='%s drifter no. %s' % (buoy_metadata[3], buoy_metadata[0]),
+                ISO_topic_category=iso,
+                data_center=data_center,
+                summary='',
+                time_coverage_start=start,
+                time_coverage_end=end,
+                source=source,
+                geographic_location=geoloc)
+            if ds_cr:
+                meta_uri, muc = DatasetURI.objects.get_or_create(uri=metadata_path, dataset=ds)
+                data_uri, duc = DatasetURI.objects.get_or_create(uri=export_path, dataset=ds)
+            start = end
+            end = end + dt
+
+    def add_subset(self):
+        pass
+
     def export(self, export_root, metadata, data):
         export_path = os.path.join(export_root, self.gen_file_name(metadata))
-        print('Export buoy #%s data to: %s | Left %s buoys' % (metadata[0], export_path, len(metadata)))
+        print('Export buoy #%s data to: %s' % (metadata[0], export_path))
         np.savetxt(export_path, data, header=';'.join(self.COL_NAMES), fmt='%s', delimiter=';')
         return export_path
 
@@ -81,22 +118,21 @@ class SVPDrifterManager(models.Manager):
             count : Number of ingested buoy datasets
         """
 
-        export_root = '/vagrant/shared/test_data'
         source, data_center, iso = self.set_metadata()
-        metadata_file = nansat_filename(metadata_uri)
+        metadata_path = nansat_filename(metadata_uri)
         data_file = nansat_filename(data_uri)
 
-        convert_datetime_vctrz = np.vectorize(self.convert_datetime)
         data = []
 
         # Metadata info: http://www.aoml.noaa.gov/envids/gld/general_info/dir_table.php
         # Data: http://www.aoml.noaa.gov/envids/gld/FtpMetadataInstructions.php
-        metadata = self.read_metadata(metadata_file)
+        metadata = self.read_metadata(metadata_path)
 
         # Read file with buoy data
         # Metadata info: http://www.aoml.noaa.gov/envids/gld/general_info/dir_table.php
         # Data: http://www.aoml.noaa.gov/envids/gld/general_info/krig_table.php
         # Attention! The columns in the description are not exactly correct
+        cnt = 0
         with open(data_file, 'r') as data_f:
             print('Open file: %s' % data_uri)
             for line in data_f:
@@ -108,37 +144,18 @@ class SVPDrifterManager(models.Manager):
                 # Else we accumulated all information about one buoy
                 # and want to process that
                 else:
-
+                    cnt += 1
                     # Extract metadata about the buoy from meta file
-                    buoy = metadata.pop(0)
-                    data = np.array(data)
-                    # Export buoy data to csv and get path to file
-                    export_path = self.export(export_root, buoy, data)
-                    # Create timestamp from row data
-                    timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
-                    # Separate whole buoy dataset for several intervals with <chunk_duration> step
-                    dt = datetime.timedelta(days=self.CHUNK_DURATION)
-                    # Start and end datetime for subset
-                    start = timestamp.min()
-                    end = start + dt
-                    while end < timestamp.max():
-                        subset = data[(timestamp >= start) & (timestamp <= end)]
-                        geometry = self.get_geometry(lons=subset[:, 5], lats=subset[:, 4])
-                        geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
-
-                        ds, ds_cr = Dataset.objects.get_or_create(
-                            entry_title='%s drifter no. %s' % (buoy[3], buoy[0]),
-                            ISO_topic_category=iso,
-                            data_center=data_center,
-                            summary='',
-                            time_coverage_start=start,
-                            time_coverage_end=end,
-                            source=source,
-                            geographic_location=geoloc)
-                        if ds_cr:
-                            meta_uri, muc = DatasetURI.objects.get_or_create(uri=metadata_file, dataset=ds)
-                            data_uri, duc = DatasetURI.objects.get_or_create(uri=export_path, dataset=ds)
-                        start = end
-                        end = end + dt
+                    self.process_data(metadata.pop(0), data, iso, data_center, source, metadata_path)
                     data = list()
-        return 0
+
+            # Add last buoy thom the input file
+            cnt += 1
+            self.process_data(metadata.pop(0), data, iso, data_center, source, metadata_path)
+
+            if len(metadata) == 0:
+                print('All buoys were added to the database')
+            else:
+                warnings.warn('Not all buoys were added to the database! Missed %s buoys' % (len(metadata)))
+
+        return cnt
