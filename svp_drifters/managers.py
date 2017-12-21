@@ -56,6 +56,15 @@ class SVPDrifterManager(models.Manager):
         geometry = LineString(lon_lat)
         return geometry
 
+    def split_time_coverage(self, start, end):
+        period = (end - start).days
+        steps = range(0, period, self.CHUNK_DURATION)
+        # TODO: Don't catch datasets smaller then one day
+        time_steps = [start + datetime.timedelta(days=step) for step in steps]
+        if time_steps[-1] != end:
+            time_steps.append(end)
+        return time_steps
+
     def process_data(self, buoy_metadata, data, iso, data_center, source, metadata_path):
         convert_datetime_vctrz = np.vectorize(self.convert_datetime)
         data = np.array(data)
@@ -64,13 +73,10 @@ class SVPDrifterManager(models.Manager):
         # Create timestamp from row data
         timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
         # Separate whole buoy dataset for several intervals with <chunk_duration> step
-        dt = datetime.timedelta(days=self.CHUNK_DURATION)
+        time_steps = self.split_time_coverage(timestamp.min(), timestamp.max())
         # Start and end datetime for subset
-        start = timestamp.min()
-        end = start + dt
-        # TODO: Check out is it cover last subset for the buoy
-        while end < timestamp.max():
-            subset = data[(timestamp >= start) & (timestamp <= end)]
+        for step in xrange(len(time_steps) - 1):
+            subset = data[(timestamp >= time_steps[step]) & (timestamp <= time_steps[step + 1])]
             geometry = self.get_geometry(lons=subset[:, 5], lats=subset[:, 4])
             geoloc, geo_cr = GeographicLocation.objects.get_or_create(geometry=geometry)
 
@@ -79,18 +85,13 @@ class SVPDrifterManager(models.Manager):
                 ISO_topic_category=iso,
                 data_center=data_center,
                 summary='',
-                time_coverage_start=start,
-                time_coverage_end=end,
+                time_coverage_start=time_steps[step],
+                time_coverage_end=time_steps[step + 1],
                 source=source,
                 geographic_location=geoloc)
             if ds_cr:
                 meta_uri, muc = DatasetURI.objects.get_or_create(uri=metadata_path, dataset=ds)
                 data_uri, duc = DatasetURI.objects.get_or_create(uri=export_path, dataset=ds)
-            start = end
-            end = end + dt
-
-    def add_subset(self):
-        pass
 
     def export(self, export_root, metadata, data):
         export_path = os.path.join(export_root, self.gen_file_name(metadata))
