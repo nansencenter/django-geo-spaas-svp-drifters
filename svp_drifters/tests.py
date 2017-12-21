@@ -5,7 +5,7 @@ from svp_drifters.models import SVPDrifter
 from geospaas.vocabularies.models import Platform, Instrument, DataCenter, ISOTopicCategory
 from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Dataset
 
-import datetime
+from datetime import datetime
 from math import ceil
 import tempfile
 import warnings
@@ -15,6 +15,7 @@ import os
 
 class SVPDrifterModelTest(TestCase):
     fixtures = ['vocabularies']
+    # TODO: Hardcode
     TEST_DIR = '/vagrant/shared/src/django-geo-spaas-svp-drifters/test_data/'
     METADATA_PATH = os.path.join(TEST_DIR, 'dirfl_1_5000_test.dat')
     DATA_PATH = os.path.join(TEST_DIR, 'buoydata_1_5000_test.dat')
@@ -56,7 +57,7 @@ class SVPDrifterModelTest(TestCase):
             hours = range(0, 24, 6) * daynum
             for i in xrange(len(hours)):
                 converted_date = SVPDrifter.objects.convert_datetime(month, daytimes[i], year)
-                manual_date = datetime.datetime(year=int(year), month=int(month), day=days[i], hour=hours[i])
+                manual_date = datetime(year=int(year), month=int(month), day=days[i], hour=hours[i])
                 self.assertEqual(converted_date, manual_date)
 
     def test_read_metadata(self):
@@ -85,6 +86,21 @@ class SVPDrifterModelTest(TestCase):
         svp_geo_2 = SVPDrifter.objects.get_geometry(lons_2_360, lats)
         self.assertEqual(geo_2, svp_geo_2)
 
+    def test_split_time_coverage(self):
+        date_1 = datetime(1999, 3, 12)
+        date_2 = datetime(1999, 5, 1)
+        time_steps = SVPDrifter.objects.split_time_coverage(date_1, date_2)
+        self.assertEqual(len(time_steps), 11)
+        self.assertIsInstance(time_steps[0], datetime)
+        self.assertEqual(time_steps[0], date_1)
+        self.assertEqual(time_steps[-1], date_2)
+        self.assertEqual((time_steps[1] - time_steps[0]).days, SVPDrifter.objects.CHUNK_DURATION)
+        # date_3 = datetime(1999, 5, 1, 23)
+        # time_steps_2 = SVPDrifter.objects.split_time_coverage(date_2, date_3)
+        # self.assertEqual(len(time_steps_2), 2)
+        # self.assertEqual(time_steps_2[-1], date_3)
+        # self.assertLess((time_steps_2[1] - time_steps_2[0]).days, SVPDrifter.objects.CHUNK_DURATION)
+
     @override_settings(PRODUCTS_ROOT=TMP)
     def test_get_or_create_several_fls(self):
         cnt = SVPDrifter.objects.get_or_create(self.METADATA_PATH, self.DATA_PATH)
@@ -102,9 +118,9 @@ class SVPDrifterModelTest(TestCase):
 
     @override_settings(PRODUCTS_ROOT=TMP)
     def test_get_or_create_data_chunk(self):
-        start_date = datetime.datetime(1988, 3, 8, 0, 0, 0, 0)
-        end_date = datetime.datetime(1988, 9, 13, 18, 0, 0, 0)
-        chunk_num = ceil((end_date - start_date).days / 5.)
+        start_date = datetime(1988, 3, 8, 0, 0, 0, 0)
+        end_date = datetime(1988, 9, 13, 18, 0, 0, 0)
+        chunk_num = ceil((end_date - start_date).days / float(SVPDrifter.objects.CHUNK_DURATION))
 
         with warnings.catch_warnings(record=True) as w:
             cnt = SVPDrifter.objects.get_or_create(
