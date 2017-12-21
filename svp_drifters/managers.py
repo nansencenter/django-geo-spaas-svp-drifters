@@ -5,6 +5,7 @@ import os
 import pythesint as pti
 
 from django.db import models
+from django.conf import settings
 from django.contrib.gis.geos import LineString
 
 from geospaas.utils import validate_uri, nansat_filename
@@ -16,7 +17,6 @@ from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Data
 class SVPDrifterManager(models.Manager):
 
     CHUNK_DURATION = 5
-    EXPORT_ROOT = '/vagrant/shared/test_data'
     COL_NAMES = ['id', 'month', 'daytime', 'year', 'lat', 'lon', 't',
                  've', 'vn', 'speed', 'varlat', 'varlon', 'vart']
 
@@ -60,7 +60,7 @@ class SVPDrifterManager(models.Manager):
         convert_datetime_vctrz = np.vectorize(self.convert_datetime)
         data = np.array(data)
         # Export buoy data to csv and get path to file
-        export_path = self.export(self.EXPORT_ROOT, buoy_metadata, data)
+        export_path = self.export(settings.PRODUCTS_ROOT, buoy_metadata, data)
         # Create timestamp from row data
         timestamp = convert_datetime_vctrz(data[:, 1], data[:, 2], data[:, 3])
         # Separate whole buoy dataset for several intervals with <chunk_duration> step
@@ -68,6 +68,7 @@ class SVPDrifterManager(models.Manager):
         # Start and end datetime for subset
         start = timestamp.min()
         end = start + dt
+        # TODO: Check out is it cover last subset for the buoy
         while end < timestamp.max():
             subset = data[(timestamp >= start) & (timestamp <= end)]
             geometry = self.get_geometry(lons=subset[:, 5], lats=subset[:, 4])
