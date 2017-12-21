@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.gis.geos import LineString
 
 from svp_drifters.models import SVPDrifter
@@ -6,13 +6,19 @@ from geospaas.vocabularies.models import Platform, Instrument, DataCenter, ISOTo
 from geospaas.catalog.models import GeographicLocation, DatasetURI, Source, Dataset
 
 import datetime
+from math import ceil
+import tempfile
+import warnings
 import calendar
 import os
 
 
 class SVPDrifterModelTest(TestCase):
     fixtures = ['vocabularies']
-    METADATA_PATH = '/vagrant/shared/src/django-geo-spaas-svp-drifters/test_data/dirfl_1_5000_test.dat'
+    TEST_DIR = '/vagrant/shared/src/django-geo-spaas-svp-drifters/test_data/'
+    METADATA_PATH = os.path.join(TEST_DIR, 'dirfl_1_5000_test.dat')
+    DATA_PATH = os.path.join(TEST_DIR, 'buoydata_1_5000_test.dat')
+    TMP = tempfile.mkdtemp()
 
     def test_set_metadata(self):
         src, dc, iso = SVPDrifter.objects.set_metadata()
@@ -79,3 +85,45 @@ class SVPDrifterModelTest(TestCase):
         svp_geo_2 = SVPDrifter.objects.get_geometry(lons_2_360, lats)
         self.assertEqual(geo_2, svp_geo_2)
 
+    @override_settings(PRODUCTS_ROOT=TMP)
+    def test_get_or_create_several_fls(self):
+        cnt = SVPDrifter.objects.get_or_create(self.METADATA_PATH, self.DATA_PATH)
+        self.assertEqual(cnt, 3)
+        dataset = Dataset.objects.filter(source__platform__short_name='BUOYS')
+        self.assertGreater(len(dataset), 0)
+        data_uris = set(el.dataseturi_set.all()[1].uri for el in dataset)
+        self.assertEqual(len(data_uris), cnt)
+        metadata_uris = set(el.dataseturi_set.all()[0].uri for el in dataset)
+        self.assertEqual(len(metadata_uris), 1)
+        self.assertTrue(os.path.exists(metadata_uris.pop()))
+        map(lambda uri: self.assertTrue(os.path.exists(uri)), data_uris)
+        # All subset in the db has to get 2 uris
+        map(lambda el: self.assertEqual(len(el.dataseturi_set.all()), 2), dataset)
+
+    @override_settings(PRODUCTS_ROOT=TMP)
+    def test_get_or_create_data_chunk(self):
+        start_date = datetime.datetime(1988, 3, 8, 0, 0, 0, 0)
+        end_date = datetime.datetime(1988, 9, 13, 18, 0, 0, 0)
+        chunk_num = ceil((end_date - start_date).days / 5.)
+
+        with warnings.catch_warnings(record=True) as w:
+            cnt = SVPDrifter.objects.get_or_create(
+                self.METADATA_PATH, os.path.join(self.TEST_DIR, 'buoydata_1_test.dat'))
+
+            self.assertEqual(len(w), 1)
+            self.assertTrue('Not all buoys were added to the database!' in str(w[-1].message))
+
+        dataset = Dataset.objects.filter(source__platform__short_name='BUOYS').order_by('time_coverage_start')
+        self.assertEqual(len(dataset), chunk_num)
+        # TODO: Compare two datetime objects
+        first_subset = dataset.first()
+        self.assertEqual(first_subset.time_coverage_start.year, start_date.year)
+        self.assertEqual(first_subset.time_coverage_start.month, start_date.month)
+        self.assertEqual(first_subset.time_coverage_start.day, start_date.day)
+        self.assertEqual(first_subset.time_coverage_start.hour, start_date.hour)
+        last_subset = dataset.last()
+        print(last_subset.time_coverage_end)
+        self.assertEqual(last_subset.time_coverage_end.year, end_date.year)
+        self.assertEqual(last_subset.time_coverage_end.month, end_date.month)
+        self.assertEqual(last_subset.time_coverage_end.day, end_date.day)
+        self.assertEqual(last_subset.time_coverage_end.hour, end_date.hour)
