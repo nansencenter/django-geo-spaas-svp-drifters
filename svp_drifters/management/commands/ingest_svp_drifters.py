@@ -18,6 +18,7 @@ class Command(BaseCommand):
     help = 'Add drifter metadata to archive'
 
     def add_arguments(self, parser):
+        parser.add_argument('files', nargs='*', type=str)
         parser.add_argument('--start',
                             action='store',
                             default='2014-01-01',
@@ -48,8 +49,8 @@ class Command(BaseCommand):
                             help='''Maximum number of drifters''')
 
     def handle(self, *args, **options):
-        if not len(args)>=2:
-            raise IOError('Please provide two filenames')
+        if not len(options['files'])==2:
+            raise IOError('Please provide two filenames for metadata and data')
         start = parse(options['start'])
         stop = parse(options['stop'])
         minlon = float(options['minlon'])
@@ -58,7 +59,7 @@ class Command(BaseCommand):
         maxlat = float(options['maxlat'])
         maxnum = eval(options['maxnum'])
         
-        uris = uris_from_args(args[0], args[1])
+        uris = uris_from_args([options['files'][0], options['files'][1]])
         count = SVPDrifter.objects.add_svp_drifters(uris[0], uris[1],
                 time_coverage_start=start,
                 time_coverage_end=stop,
