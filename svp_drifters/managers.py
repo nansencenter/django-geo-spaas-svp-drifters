@@ -10,7 +10,7 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.gis.geos import LineString
 
-from geospaas.utils import validate_uri, nansat_filename
+from geospaas.utils.utils import validate_uri, nansat_filename
 
 from geospaas.vocabularies.models import Platform
 from geospaas.vocabularies.models import Instrument

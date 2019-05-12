@@ -8,7 +8,7 @@ from django.db import models
 from django.contrib.gis.geos import LineString
 
 from geospaas.catalog.models import Dataset as CatalogDataset
-from geospaas.utils import nansat_filename
+from geospaas.utils.utils import nansat_filename
 from svp_drifters.managers import SVPDrifterManager
 
 class SVPDrifter(CatalogDataset):
